@@ -1,4 +1,7 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Castle.Core.Logging;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using NUnit.Framework;
 using StorageMangler.Domain.Infrastructure;
@@ -22,7 +25,7 @@ namespace StorageMangler.Domain.Test
         private ForbiddenNamesService _forbiddenNamesService;
         private Mock<IForbiddenPatternsRepository> _forbiddenPatternsRepository;
         private Mock<ILogger<ForbiddenNamesService>> _mocklogger;
-        private Mock<ILoggerFactory> _mockLogger;
+        private NullLoggerFactory _nullLoggerFactory;
         /// <summary>
         /// TestStorageService constructor defined
         /// </summary>
@@ -33,9 +36,9 @@ namespace StorageMangler.Domain.Test
             _fileStorage = new Mock<IFileStorage>();
             _forbiddenPatternsRepository = new Mock<IForbiddenPatternsRepository>();
             _mocklogger = new Mock<ILogger<ForbiddenNamesService>>();
-            _mockLogger=new Mock<ILoggerFactory>();
+            _nullLoggerFactory = new NullLoggerFactory();
             _forbiddenNamesService = new ForbiddenNamesService(_forbiddenPatternsRepository.Object, _mocklogger.Object);
-            _storageService = new StorageService(_fileMetaDataRepository.Object, _fileStorage.Object, _forbiddenNamesService, (ILoggerFactory)_mockLogger.Object);
+            _storageService = new StorageService(_fileMetaDataRepository.Object, _fileStorage.Object, _forbiddenNamesService, _nullLoggerFactory);
         }
 
         /// <summary>
@@ -103,18 +106,21 @@ namespace StorageMangler.Domain.Test
                      Created= DateTime.Now
                 },
             }.AsQueryable();
+
             //setup PreStaging files
             var files = _fileStorage.Setup(mr => mr.ListPreStagingFiles()).Returns(Task.FromResult(fileslist.ToList()));
             //setup Fetch all pattern
             _forbiddenPatternsRepository.Setup(m => m.FetchAll()).Returns(Task.FromResult(patternlist.ToList()));
-            //Getting patterns
-            var patterns = await _forbiddenNamesService.GetForbiddenPatternsAsync();
-            //comparing files
-            var result = fileslist.Where(f => !IsAMatch(patterns, f.Name)).ToList();
-
-            Assert.IsNotNull(result);
-            Assert.IsTrue(result.Count > 0);
-
+            //Act
+            var result = _storageService.ListNonForbiddenFiles();
+            try
+            {
+                Assert.IsTrue(result.Result.Count > 0);
+            }
+            catch (AssertFailedException)
+            {
+                Assert.Fail("Failed");
+            }
         }
         /// <summary>
         /// Check if file not exist in the storage
@@ -170,30 +176,18 @@ namespace StorageMangler.Domain.Test
             var files = _fileStorage.Setup(mr => mr.ListPreStagingFiles()).Returns(Task.FromResult(fileslist.ToList()));
             //setup Fetch all pattern
             _forbiddenPatternsRepository.Setup(m => m.FetchAll()).Returns(Task.FromResult(patternlist.ToList()));
-            //Getting patterns
-            var patterns = await _forbiddenNamesService.GetForbiddenPatternsAsync();
-            //comparing files
-            var result = fileslist.Where(f => !IsAMatch(patterns, f.Name)).ToList();
-
-            Assert.AreEqual(0,result.Count);
-
-        }
-        /// <summary>
-        /// Pattern match function
-        /// </summary>
-        /// <param name="patterns"></param>
-        /// <param name="name"></param>
-        /// <returns></returns>
-        private bool IsAMatch(HashSet<string> patterns, string name)
-        {
-            foreach (var pattern in patterns)
+           
+            //Act
+            var result = _storageService.ListNonForbiddenFiles();
+            
+            try
             {
-                if (Regex.IsMatch(name, pattern))
-                {
-                    return false;
-                }
+                Assert.IsFalse(result.Result.Count > 0);
             }
-            return true;
+            catch (AssertFailedException)
+            {
+                Assert.Fail("Failed");
+            }
         }
     }
 }
